@@ -1,0 +1,42 @@
+#!/bin/bash
+set -e
+
+OPENRC=$1
+TAG=$2
+SSH_KEY_FILE=$3
+
+if [ $# -ne 3 ]; then
+    echo "Usage: install <openrc> <tag> <ssh_key>"
+    exit 1
+fi
+
+source "$OPENRC"
+
+echo "[*] Creating keypair..."
+openstack keypair create --public-key ${SSH_KEY_FILE}.pub ${TAG}-keypair
+
+echo "[*] Creating network..."
+NETWORK_NAME="${TAG}-net"
+SUBNET_NAME="${TAG}-subnet"
+ROUTER_NAME="${TAG}-router"
+
+openstack network create $NETWORK_NAME --tag $TAG
+openstack subnet create --network $NETWORK_NAME --subnet-range 10.0.0.0/24 --gateway 10.0.0.1 --tag $TAG $SUBNET_NAME
+openstack router create $ROUTER_NAME --tag $TAG
+openstack router set $ROUTER_NAME --external-gateway ext-net
+openstack router add subnet $ROUTER_NAME $SUBNET_NAME
+
+echo "[*] Setting up security group..."
+SECGROUP_NAME="${TAG}-secgroup"
+openstack security group create $SECGROUP_NAME --tag $TAG
+openstack security group rule create --proto icmp $SECGROUP_NAME
+openstack security group rule create --proto tcp --dst-port 22 $SECGROUP_NAME
+openstack security group rule create --proto tcp --dst-port 5000 $SECGROUP_NAME
+openstack security group rule create --proto udp --dst-port 6000 $SECGROUP_NAME
+
+echo "[*] Creating instances..."
+
+# Use helper script to handle logic
+python3 scripts/cloud_utils.py install $TAG $TAG-keypair $SSH_KEY_FILE
+
+echo "[*] Install complete."

@@ -16,3 +16,14 @@ export FLASK_RUN_HOST=localhost
 export FLASK_RUN_PORT=8210
 flask run
 
+project-root/
+├── install
+├── operate
+├── cleanup
+├── scripts/
+│   ├── cloud_utils.py
+│   ├── userdata_service.sh
+│   ├── userdata_proxy.sh
+│   └── userdata_bastion.sh
+├── servers.conf
+└── service.py  

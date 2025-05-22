@@ -1,0 +1,20 @@
+#!/bin/bash
+set -e
+
+OPENRC=$1
+TAG=$2
+SSH_KEY_FILE=$3
+
+if [ $# -ne 3 ]; then
+    echo "Usage: operate <openrc> <tag> <ssh_key>"
+    exit 1
+fi
+
+source "$OPENRC"
+
+echo "[*] Entering operations mode. Press Ctrl-C to exit."
+
+while true; do
+    python3 scripts/cloud_utils.py operate $TAG $TAG-keypair $SSH_KEY_FILE
+    sleep 30
+done

@@ -16,6 +16,3 @@ def index():
     Time= time.strftime("%H:%M:%S")
     rand=str(random.randint(0,100))
     return Time+" "+client_ip + ":" +client_port +" -- " + host+" ("+hostname+") " +rand+"\n"
-
-
-
