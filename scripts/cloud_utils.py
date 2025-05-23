@@ -104,6 +104,7 @@ def update_haproxy_config(tag, ssh_key_file):
 
     backend service_nodes
         balance roundrobin
+        option httpchk GET /health
     """
     for idx, ip in enumerate(internal_ips):
         haproxy_cfg += f"\tserver srv{idx+1} {ip}:5000 check\n"
