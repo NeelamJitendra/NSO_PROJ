@@ -60,7 +60,7 @@ def update_haproxy_config(tag, ssh_key_file):
         server_info = subprocess.check_output(f"openstack server show {srv['ID']} -f json", shell=True)
         info = json.loads(server_info.decode())
         for net in info['addresses'].split(","):
-            ip = net.strip().split(" ")[-1]
+            ip = net.strip().split("=")[-1]
             if "-proxy" in srv["Name"] and "." in ip:
                 proxy_ip = ip
             elif "-srv" in srv["Name"] and ip.startswith("10."):
@@ -69,17 +69,34 @@ def update_haproxy_config(tag, ssh_key_file):
     if not proxy_ip:
         print("[-] No PROXY IP found.")
         return
-
-    haproxy_cfg = """global
-    log /dev/log local0
-    maxconn 2048
+    haproxy_cfg = """
+    global
+        log /dev/log    local0
+        log /dev/log    local1 notice
+        chroot /var/lib/haproxy
+        stats socket /run/haproxy/admin.sock mode 660 level admin
+        stats timeout 30s
+        user haproxy
+        group haproxy
+        daemon
+        log /dev/log local0
+        maxconn 2048
 
     defaults
         log     global
-        mode    tcp
-        timeout connect 5s
-        timeout client  30s
-        timeout server  30s
+        mode    http
+        option  httplog
+        option  dontlognull
+        timeout connect 5000
+        timeout client  50000
+        timeout server  50000
+        errorfile 400 /etc/haproxy/errors/400.http
+        errorfile 403 /etc/haproxy/errors/403.http
+        errorfile 408 /etc/haproxy/errors/408.http
+        errorfile 500 /etc/haproxy/errors/500.http
+        errorfile 502 /etc/haproxy/errors/502.http
+        errorfile 503 /etc/haproxy/errors/503.http
+        errorfile 504 /etc/haproxy/errors/504.http
 
     frontend service_py
         bind *:5000
@@ -89,7 +106,17 @@ def update_haproxy_config(tag, ssh_key_file):
         balance roundrobin
     """
     for idx, ip in enumerate(internal_ips):
-        haproxy_cfg += f"    server srv{idx+1} {ip}:5000 check\n"
+        haproxy_cfg += f"\tserver srv{idx+1} {ip}:5000 check\n"
+    haproxy_cfg += """
+    frontend snmp_proxy
+        bind *:6000
+        default_backend snmp_nodes
+
+    backend snmp_nodes
+        balance roundrobin
+    """
+    for idx, ip in enumerate(internal_ips):
+        haproxy_cfg += f"\tserver snmp{idx+1} {ip}:6000 check\n"
 
     with tempfile.NamedTemporaryFile(delete=False, mode='w') as f:
         f.write(haproxy_cfg)

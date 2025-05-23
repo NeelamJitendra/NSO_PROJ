@@ -16,3 +16,6 @@ def index():
     Time= time.strftime("%H:%M:%S")
     rand=str(random.randint(0,100))
     return Time+" "+client_ip + ":" +client_port +" -- " + host+" ("+hostname+") " +rand+"\n"
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
