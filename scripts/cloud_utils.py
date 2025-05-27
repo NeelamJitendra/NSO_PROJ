@@ -59,15 +59,54 @@ def update_haproxy_config(tag, ssh_key_file):
     for srv in servers:
         server_info = subprocess.check_output(f"openstack server show {srv['ID']} -f json", shell=True)
         info = json.loads(server_info.decode())
-        for net in info['addresses'].split(","):
-            ip = net.strip().split("=")[-1]
-            if "-proxy" in srv["Name"] and "." in ip:
-                proxy_ip = ip
-            elif "-srv" in srv["Name"] and ip.startswith("10."):
-                internal_ips.append(ip)
+        addresses = info.get("addresses", {})
+
+        if isinstance(addresses, str):
+            for ip in addresses.replace("=", ",").split(","):
+                ip = ip.strip()
+                if not ip:
+                    continue
+                print(f"[#] Debug (str): address found: {ip}")
+                if "-proxy" in srv["Name"]:
+                    proxy_ip = ip
+                elif "-srv" in srv["Name"] and ip.startswith("10."):
+                    internal_ips.append(ip)
+        elif isinstance(addresses, dict):
+            for net_name, ip_list in addresses.items():
+                for ip_info in ip_list:
+                    ip = ip_info.get("addr")
+                    if not ip:
+                        continue
+                    print(f"[#] Debug: address found: {ip}")
+                    if "-proxy" in srv["Name"] and not ip.startswith("10."):
+                        proxy_ip = ip
+                    elif "-srv" in srv["Name"] and ip.startswith("10."):
+                        internal_ips.append(ip)
 
     if not proxy_ip:
-        print("[-] No PROXY IP found.")
+        print("[-] No public PROXY IP found, falling back to private IPs.")
+        for srv in servers:
+            if "-proxy" in srv["Name"]:
+                server_info = subprocess.check_output(f"openstack server show {srv['ID']} -f json", shell=True)
+                info = json.loads(server_info.decode())
+                addresses = info.get("addresses", {})
+                if isinstance(addresses, dict):
+                    for net_name, ip_list in addresses.items():
+                        for ip_info in ip_list:
+                            ip = ip_info.get("addr")
+                            if ip:
+                                proxy_ip = ip
+                                break
+
+    if not proxy_ip:
+        print("[-] Could not find any usable PROXY IP.")
+        return
+
+    print(f"[#] Debug: Using proxy IP: {proxy_ip}")
+
+    print(f"[#] Debug: Checking connectivity to proxy IP: {proxy_ip}")
+    if subprocess.run(f"ping -c 2 {proxy_ip}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+        print(f"[-] Error: Unable to reach proxy IP: {proxy_ip}. Please check your network configuration.")
         return
     haproxy_cfg = """
     global
@@ -118,7 +157,7 @@ def update_haproxy_config(tag, ssh_key_file):
     """
     for idx, ip in enumerate(internal_ips):
         haproxy_cfg += f"\tserver snmp{idx+1} {ip}:6000 check\n"
-
+    print(f"[#] Debug: haproxy config file {haproxy_cfg}")
     with tempfile.NamedTemporaryFile(delete=False, mode='w') as f:
         f.write(haproxy_cfg)
         local_cfg_path = f.name
