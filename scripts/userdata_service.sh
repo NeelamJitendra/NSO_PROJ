@@ -29,7 +29,9 @@ def index():
     Time= time.strftime("%H:%M:%S")
     rand=str(random.randint(0,100))
     return Time+" "+client_ip + ":" +client_port +" -- " + host+" ("+hostname+") " +rand+"\n"
-
+@app.route('/health')
+def health():
+    return "OK", 200
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
@@ -38,5 +40,8 @@ pip3 install flask
 nohup python3 /opt/service/service.py &
 
 # Configure SNMPd (basic setup)
-echo 'rocommunity public' > /etc/snmp/snmpd.conf
-systemctl restart snmpd
+cat <<EOF > /etc/snmp/snmpd.conf
+rocommunity public default
+agentAddress udp:6000
+EOF
+sudo systemctl restart snmpd
