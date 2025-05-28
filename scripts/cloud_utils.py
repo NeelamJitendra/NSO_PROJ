@@ -147,16 +147,7 @@ def update_haproxy_config(tag, ssh_key_file):
     """
     for idx, ip in enumerate(internal_ips):
         haproxy_cfg += f"\tserver srv{idx+1} {ip}:5000 check\n"
-    haproxy_cfg += """
-    frontend snmp_proxy
-        bind *:6000
-        default_backend snmp_nodes
 
-    backend snmp_nodes
-        balance roundrobin
-    """
-    for idx, ip in enumerate(internal_ips):
-        haproxy_cfg += f"\tserver snmp{idx+1} {ip}:6000 check\n"
     print(f"[#] Debug: haproxy config file {haproxy_cfg}")
     with tempfile.NamedTemporaryFile(delete=False, mode='w') as f:
         f.write(haproxy_cfg)
@@ -164,10 +155,18 @@ def update_haproxy_config(tag, ssh_key_file):
 
     remote_path = "/tmp/haproxy.cfg"
     subprocess.run(f"scp -o StrictHostKeyChecking=no -i {ssh_key_file} {local_cfg_path} ubuntu@{proxy_ip}:{remote_path}", shell=True, check=True)
+    iptables_rules = "\n".join([
+        f"""sudo iptables -t nat -C PREROUTING -p udp --dport 6000 -m statistic --mode nth --every {len(internal_ips)} --packet {i} -j DNAT --to-destination {ip}:6000 2>/dev/null || sudo iptables -t nat -A PREROUTING -p udp --dport 6000 -m statistic --mode nth --every {len(internal_ips)} --packet {i} -j DNAT --to-destination {ip}:6000 && \
+        sudo iptables -t nat -C POSTROUTING -p udp -d {ip} --dport 6000 -j MASQUERADE 2>/dev/null || sudo iptables -t nat -A POSTROUTING -p udp -d {ip} --dport 6000 -j MASQUERADE"""
+        for i, ip in enumerate(internal_ips)
+    ])
+
     commands = f"""
         sudo mv {remote_path} /etc/haproxy/haproxy.cfg &&
         sudo haproxy -c -f /etc/haproxy/haproxy.cfg &&
-        sudo systemctl restart haproxy
+        sudo systemctl restart haproxy &&
+        sudo sysctl -w net.ipv4.ip_forward=1 &&
+        {iptables_rules}
     """
     subprocess.run(f"ssh -o StrictHostKeyChecking=no -i {ssh_key_file} ubuntu@{proxy_ip} '{commands}'", shell=True, check=True)
     print("[+] HAProxy config updated.")
