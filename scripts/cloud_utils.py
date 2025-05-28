@@ -74,14 +74,13 @@ def update_haproxy_config(tag, ssh_key_file):
         elif isinstance(addresses, dict):
             for net_name, ip_list in addresses.items():
                 for ip_info in ip_list:
-                    ip = ip_info.get("addr")
-                    if not ip:
-                        continue
-                    print(f"[#] Debug: address found: {ip}")
-                    if "-proxy" in srv["Name"] and not ip.startswith("10."):
-                        proxy_ip = ip
-                    elif "-srv" in srv["Name"] and ip.startswith("10."):
-                        internal_ips.append(ip)
+                    ip = ip_info.get("addr") if isinstance(ip_info, dict) else ip_info
+                    if ip:
+                        print(f"[#] Debug: address found: {ip}")
+                        if "-proxy" in srv["Name"] and not ip.startswith("10."):
+                            proxy_ip = ip
+                        elif "-srv" in srv["Name"] and ip.startswith("10."):
+                            internal_ips.append(ip)
 
     if not proxy_ip:
         print("[-] No public PROXY IP found, falling back to private IPs.")
@@ -93,7 +92,7 @@ def update_haproxy_config(tag, ssh_key_file):
                 if isinstance(addresses, dict):
                     for net_name, ip_list in addresses.items():
                         for ip_info in ip_list:
-                            ip = ip_info.get("addr")
+                            ip = ip_info.get("addr") if isinstance(ip_info, dict) else ip_info
                             if ip:
                                 proxy_ip = ip
                                 break
@@ -204,16 +203,26 @@ def install_mode(tag, ssh_key, ssh_key_file):
     create_vm(f"{tag}-proxy", image, flavor, net, secgroup, ssh_key, "scripts/userdata_proxy.sh", tag, assign_ip=True)
 
     print("[*] Deploying SERVICE nodes...")
-    for i in range(3):
+    nodecount = get_required_node_count()
+    for i in range(nodecount):
         create_vm(f"{tag}-srv{i}", image, flavor, net, secgroup, ssh_key, "scripts/userdata_service.sh", tag)
 
     update_haproxy_config(tag, ssh_key_file)
 
 def cleanup_mode(tag):
-    print("[*] Deleting all instances...")
-    output = subprocess.check_output("openstack server list -f value -c ID", shell=True)
-    for line in output.decode().splitlines():
-        run(f"openstack server delete {line}")
+    print(f"[*] Deleting nodes with '{tag}' in the name...")
+    output = subprocess.check_output(f"openstack server list --long -f json", shell=True)
+    servers = json.loads(output.decode())
+    for server in servers:
+        server_name = server["Name"].strip()
+        server_id = server["ID"]
+
+        if any(x in server_name for x in [f"{tag}-srv", f"{tag}-proxy", f"{tag}-bastion"]):
+            print(f"[#] Found node: {server_name} (ID: {server_id})")  # Debugging line
+            print(f"[#] Deleting node: {server_name}")
+            run(f"openstack server delete {server_id}")
+        else:
+            print(f"[#] Skipping node: {server_name}")  # Debugging line
 
     print("[*] Deleting all volumes...")
     output = subprocess.check_output("openstack volume list -f value -c ID", shell=True)
@@ -232,7 +241,6 @@ def cleanup_mode(tag):
     run(f"openstack subnet delete {tag}-subnet || true")
     run(f"openstack network delete {tag}-net || true")
     run(f"openstack security group delete {tag}-secgroup || true")
-
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: cloud_utils.py <install|operate|cleanup> <tag> <ssh_key>")
